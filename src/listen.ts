@@ -1,3 +1,3 @@
 import { StaticServer } from './StaticServer';
 
-const appServer = new StaticServer();
+const staticServer = new StaticServer();

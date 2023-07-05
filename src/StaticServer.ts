@@ -7,9 +7,7 @@ export class StaticServer {
   constructor() {
     const handleStateContent = (req: IncomingMessage, res: ServerResponse) => {
       const dirPath = resolve(dirname(''));
-
       const filePath = resolve(dirPath, req.url === '/' ? 'front/index.html' : `front${req.url || ''}`);
-      console.log(filePath);
       readFile(filePath, (err, data) => {
         if (err) {
           res.writeHead(404);
