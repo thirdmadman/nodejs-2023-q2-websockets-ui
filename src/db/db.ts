@@ -10,8 +10,8 @@ export interface DB {
   game: Array<IGame>;
 }
 export const db: DB = {
-  player: [],
-  room: [],
-  gameField: [],
-  game: [],
+  player: Array<IPlayer>(),
+  room: Array<IRoom>(),
+  gameField: Array<IGameField>(),
+  game: Array<IGame>(),
 };
