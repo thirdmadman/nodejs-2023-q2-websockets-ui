@@ -1,5 +1,6 @@
-export interface IRoom {
-  id: number;
+import { IEntity } from './IEntity';
+
+export interface IRoom extends IEntity {
   playersId: Array<number>;
   isInGame: boolean;
 }

@@ -1,3 +1,5 @@
+import { IEntity } from './IEntity';
+
 export interface IGameFieldShip {
   position: {
     x: number;
@@ -15,8 +17,7 @@ export interface IGameFieldEnemyAttack {
   };
 }
 
-export interface IGameField {
-  id: number;
+export interface IGameField extends IEntity {
   gameId: number;
   userId: number;
   ships: Array<IGameFieldShip>;
