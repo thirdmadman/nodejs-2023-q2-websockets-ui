@@ -1,5 +1,7 @@
+export const AllCommunicationDTOTypes = ['reg', 'create_room', 'create_game', 'start_game', 'turn', 'attack', 'finish', 'update_room', 'update_winners'] as const;
+export type CommunicationDTOTypes =  (typeof AllCommunicationDTOTypes)[number];
 export interface CommunicationDTO {
-  type: string;
+  type: CommunicationDTOTypes;
   data: string;
   id: number;
 }
