@@ -3,6 +3,7 @@ export const AllCommunicationDTOTypes = [
   'create_room',
   'add_user_to_room',
   'create_game',
+  'add_ships',
   'start_game',
   'turn',
   'attack',
