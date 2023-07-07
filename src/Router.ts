@@ -1,4 +1,3 @@
-/* eslint-disable class-methods-use-this */
 import { WebSocket } from 'ws';
 import { IRouteObject, RouterCallback } from './interfaces/IRouteObject';
 

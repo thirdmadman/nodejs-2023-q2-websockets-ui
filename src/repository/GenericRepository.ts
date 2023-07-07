@@ -1,4 +1,3 @@
-/* eslint-disable class-methods-use-this */
 import { DB, db } from '../db/db';
 
 type Keys = keyof DB;
