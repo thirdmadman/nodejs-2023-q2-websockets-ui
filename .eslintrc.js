@@ -18,6 +18,7 @@ module.exports = {
     'plugin:@typescript-eslint/recommended',
   ],
   rules: {
+    'class-methods-use-this': 'off',
     'comma-dangle': ['error', 'only-multiline'],
     'object-curly-newline': ['error', { consistent: true }],
     'prettier/prettier': ['error', { endOfLine: 'auto' }],
