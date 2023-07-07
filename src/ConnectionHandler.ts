@@ -1,7 +1,7 @@
 import { WebSocket, WebSocketServer } from 'ws';
-import { v4 } from 'uuid';
+import { CreateGameDTO } from './dto/response/CreateGameDTO';
 import { AddPlayerDTO } from './dto/request/AddPlayerDTO';
-import { AllCommunicationDTOTypes, CommunicationDTO } from './dto/CommunicationDTO';
+import { AllCommunicationDTOTypes, CommunicationDTO, CommunicationDTOTypes } from './dto/CommunicationDTO';
 import { PlayerRequestDTO } from './dto/request/PlayerRequestDTO';
 import { PlayerResponseDTO } from './dto/response/PlayerResponseDTO';
 import { IPlayer } from './interfaces/IPlayer';
@@ -10,6 +10,8 @@ import { IRoom } from './interfaces/IRoom';
 import { roomRepository } from './repository/RoomRepository';
 import { RoomDTO, RoomUser } from './dto/response/RoomDTO';
 import { Router } from './Router';
+import { IGame } from './interfaces/IGame';
+import { gameRepository } from './repository/GameRepository';
 
 export class ConnectionHandler {
   private ws: WebSocket;
@@ -18,14 +20,12 @@ export class ConnectionHandler {
 
   private router: Router = new Router();
 
-  private userId: number;
+  private playerId = -1;
 
   constructor(webSocket: WebSocket, webSocketServer: WebSocketServer) {
     this.ws = webSocket;
     this.wsServer = webSocketServer;
 
-    // const id = v4();
-    // console.log(id);
     const processReg = (ws: WebSocket, messageData: string) => {
       const playerReq = JSON.parse(messageData) as PlayerRequestDTO;
 
@@ -48,13 +48,16 @@ export class ConnectionHandler {
         };
 
         ws.send(JSON.stringify(resp));
-        this.userId = newPlayer.id;
+        this.playerId = newPlayer.id;
       }
     };
 
     const processCreateRoom = (ws: WebSocket, messageData: string) => {
-      // const playerReq = JSON.parse(messageData) as PlayerRequestDTO;
-      const newRoom: IRoom = { id: 0, playersId: [this.userId], isInGame: false };
+      if (this.playerId < 0) {
+        return;
+      }
+
+      const newRoom: IRoom = { id: 0, playersId: [this.playerId], isInGame: false };
       const result = roomRepository.create(newRoom);
 
       if (result) {
@@ -72,23 +75,27 @@ export class ConnectionHandler {
         console.log(rooms);
 
         const roomsDTO = rooms.map((room) => ({ roomId: room.id, roomUsers: roomPlayers(room) }) as RoomDTO);
-
-        const resp: CommunicationDTO = {
-          type: 'update_room',
-          data: JSON.stringify(roomsDTO),
-          id: 0,
-        };
-        this.sendToAll(JSON.stringify(resp));
-        // ws.send(JSON.stringify(resp));
+        try {
+          const roomsDTOSting = JSON.stringify(roomsDTO);
+          this.sendToAll('update_room', roomsDTOSting);
+        } catch (err) {
+          console.error(err);
+        }
       }
     };
 
     const processAddUserToRoom = (ws: WebSocket, messageData: string) => {
+      console.log(messageData);
+      if (this.getPlayerId() < 0) {
+        return;
+      }
+
       const addPlayerDTO = JSON.parse(messageData) as AddPlayerDTO;
-      if (!addPlayerDTO || !addPlayerDTO.indexRoom) {
+      if (!addPlayerDTO || addPlayerDTO.indexRoom === undefined) {
         return;
       }
       const foundRoom = roomRepository.findOne(addPlayerDTO.indexRoom);
+      console.log(foundRoom);
 
       if (!foundRoom) {
         return;
@@ -98,11 +105,61 @@ export class ConnectionHandler {
         return;
       }
 
-      foundRoom.playersId = roomRepository.findOne;
+      if (foundRoom.playersId[0] === this.getPlayerId()) {
+        return;
+      }
+
+      console.log(foundRoom);
+
+      const enemyId = foundRoom.playersId[0];
+
+      roomRepository.delete(foundRoom.id);
+
+      const game: IGame = {
+        id: 0,
+        playersId: [enemyId, this.getPlayerId()],
+        currentTurnPlayerId: enemyId,
+        isFinished: false,
+      };
+
+      const createGameResult = gameRepository.create(game);
+
+      if (!createGameResult) {
+        return;
+      }
+
+      const playerCreateGameDTO: CreateGameDTO = {
+        idGame: createGameResult.id,
+        idPlayer: enemyId,
+      };
+
+      const enemyCreateGameDTO: CreateGameDTO = {
+        idGame: createGameResult.id,
+        idPlayer: this.getPlayerId(),
+      };
+
+      try {
+        const playerCreateGameDTOString = JSON.stringify(playerCreateGameDTO);
+        const enemyCreateGameDTOString = JSON.stringify(enemyCreateGameDTO);
+
+        this.sendToPlayer('create_game', playerCreateGameDTOString);
+        this.onSendMessageToPlayerWithId(enemyId, 'create_game', enemyCreateGameDTOString);
+      } catch (e) {
+        console.log(e);
+      }
     };
 
-    this.router.addRoute('reg', (ws: WebSocket, messageData: string) => processReg(ws, messageData));
-    this.router.addRoute('create_room', (ws: WebSocket, messageData: string) => processCreateRoom(ws, messageData));
+    const { router } = this;
+
+    router.addRoute('reg', (ws: WebSocket, messageData: string) => processReg(ws, messageData));
+    router.addRoute('create_room', (ws: WebSocket, messageData: string) => processCreateRoom(ws, messageData));
+    router.addRoute('add_user_to_room', (ws: WebSocket, messageData: string) => processAddUserToRoom(ws, messageData));
+  }
+
+  onSendMessageToPlayerWithId = (playerId: number, messageType: CommunicationDTOTypes, message: string) => null;
+
+  getPlayerId() {
+    return this.playerId;
   }
 
   handleMessage(data: Buffer) {
@@ -130,11 +187,39 @@ export class ConnectionHandler {
     }
   }
 
-  sendToAll(message: string) {
+  sendToAll(messageType: CommunicationDTOTypes, message: string) {
+    console.log('sendToAll:');
     this.wsServer.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
+        const resp: CommunicationDTO = {
+          type: messageType,
+          data: message,
+          id: 0,
+        };
+        try {
+          const respMessage = JSON.stringify(resp);
+          client.send(respMessage);
+          console.log(respMessage);
+        } catch (e) {
+          console.log(e);
+        }
       }
     });
+  }
+
+  sendToPlayer(messageType: CommunicationDTOTypes, message: string) {
+    console.log('sendToPlayer:');
+    const resp: CommunicationDTO = {
+      type: messageType,
+      data: message,
+      id: 0,
+    };
+    try {
+      const respMessage = JSON.stringify(resp);
+      this.ws.send(respMessage);
+      console.log(respMessage);
+    } catch (e) {
+      console.log(e);
+    }
   }
 }
