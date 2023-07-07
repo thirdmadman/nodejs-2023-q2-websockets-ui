@@ -27,29 +27,29 @@ export class GenericRepository<TEntity extends ExtractedType> {
   }
 
   findOne(id: number) {
-    const table = db[this.tableName] as unknown as Array<TEntity>;
+    const table = db[this.tableName] as Array<TEntity>;
     if (table && table.length > 0) {
       const foundEntity = table.find((entity) => entity.id === id);
       if (foundEntity) {
-        return foundEntity;
+        return { ...foundEntity };
       }
     }
     return null;
   }
 
   findAll() {
-    const table = db[this.tableName] as unknown as Array<TEntity>;
+    const table = db[this.tableName] as Array<TEntity>;
     if (table && table.length > 0) {
-      const entities = [];
+      const entities = Array<TEntity>();
       for (let i = 0; table.length > i; i += 1) {
         const entity = table[i];
         if (entity) {
-          entities.push(entity);
+          entities.push({ ...entity });
         }
       }
       return entities;
     }
-    return [];
+    return Array<TEntity>();
   }
 
   update(id: number, entity: TEntity) {
@@ -58,7 +58,7 @@ export class GenericRepository<TEntity extends ExtractedType> {
     if (index > -1) {
       const newEntity: TEntity = { ...entity };
       table[index] = newEntity;
-      return table[index];
+      return { ...table[index] };
     }
     return null;
   }
