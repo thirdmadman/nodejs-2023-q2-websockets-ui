@@ -19,7 +19,7 @@ export interface IGameFieldEnemyAttack {
 
 export interface IGameField extends IEntity {
   gameId: number;
-  userId: number;
+  playerId: number;
   ships: Array<IGameFieldShip>;
   enemyAttacks: Array<IGameFieldEnemyAttack>;
 }
