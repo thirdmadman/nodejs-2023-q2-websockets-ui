@@ -7,6 +7,7 @@ export const AllCommunicationDTOTypes = [
   'start_game',
   'turn',
   'attack',
+  'randomAttack',
   'finish',
   'update_room',
   'update_winners',
