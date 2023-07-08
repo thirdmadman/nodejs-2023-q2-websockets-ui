@@ -1,5 +1,5 @@
 export interface AttackRequestDTO {
-  gameID: number;
+  gameId: number;
   x: number;
   y: number;
   indexPlayer: number;
