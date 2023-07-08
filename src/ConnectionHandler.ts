@@ -332,12 +332,28 @@ export class ConnectionHandler {
 
       const result = 'miss';
 
+      const enemyId = playersId.filter((playerId) => playerId !== attackReq.indexPlayer)[0];
+
+      const enemyGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(gameId, enemyId);
+
+      if (!enemyGameField) {
+        return;
+      }
+
+      enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
+
+      const newGameField = gameFieldRepository.update(enemyGameField.id, enemyGameField);
+
+      if (!newGameField) {
+        return;
+      }
+
+      console.log(gameFieldRepository.findAll());
+
       playersId.forEach((playerId) => {
         const res = sendAttackResponseForPlayerWithId(playerId, getAttackDTO(x, y, attackReq.indexPlayer, result));
         return res;
       });
-
-      const enemyId = playersId.filter((playerId) => playerId !== attackReq.indexPlayer)[0];
 
       playersId.forEach((playerId) => {
         const res = sendPlayerTurnByPlayerId(enemyId, playerId);
@@ -416,6 +432,24 @@ export class ConnectionHandler {
       const { x, y } = generatedAttack;
       const result = 'miss';
 
+      const enemyId = playersId.filter((playerId) => playerId !== randomAttackRequestDTO.indexPlayer)[0];
+
+      const enemyGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(game.id, enemyId);
+
+      if (!enemyGameField) {
+        return;
+      }
+
+      enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
+
+      const newGameField = gameFieldRepository.update(enemyGameField.id, enemyGameField);
+
+      if (!newGameField) {
+        return;
+      }
+
+      console.log(gameFieldRepository.findAll());
+
       playersId.forEach((playerId) => {
         const res = sendAttackResponseForPlayerWithId(
           playerId,
@@ -423,8 +457,6 @@ export class ConnectionHandler {
         );
         return res;
       });
-
-      const enemyId = playersId.filter((playerId) => playerId !== randomAttackRequestDTO.indexPlayer)[0];
 
       playersId.forEach((playerId) => {
         const res = sendPlayerTurnByPlayerId(enemyId, playerId);
