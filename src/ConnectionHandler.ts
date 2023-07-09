@@ -244,8 +244,8 @@ export class ConnectionHandler {
         id: 0,
         gameId: addShipsDTO.gameId,
         playerId: this.getPlayerId(),
-        ships: { ...addShipsDTO.ships },
-        enemyAttacks: Array<IGameFieldEnemyAttack>(),
+        ships: [...addShipsDTO.ships],
+        enemyAttacks: new Array<IGameFieldEnemyAttack>(),
       };
 
       const gameFieldResult = gameFieldRepository.create(gameField);
@@ -300,6 +300,86 @@ export class ConnectionHandler {
       return attackDTO;
     };
 
+    const calculateAttack = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number): TAttackStatus => {
+      const { ships, enemyAttacks } = attackedPlayerGameField;
+
+      type TGameFieldCell = {
+        shipIndex: number;
+        isHit: boolean;
+      };
+
+      const copy = new Array<TGameFieldCell | null>(10);
+      const nodes = new Array<typeof copy>(10);
+
+      for (let i = 0; i < 10; i++) {
+        copy[i] = null;
+      }
+
+      for (let i = 0; i < nodes.length; i++) {
+        nodes[i] = copy.slice(0);
+      }
+
+      const gameField = nodes;
+
+      ships.forEach((ship, index) => {
+        for (let i = 0; i < ship.length; i += 1) {
+          if (ship.direction) {
+            gameField[ship.position.x][ship.position.y + i] = {
+              shipIndex: index,
+              isHit: false,
+            };
+          } else {
+            gameField[ship.position.x + i][ship.position.y] = {
+              shipIndex: index,
+              isHit: false,
+            };
+          }
+        }
+      });
+
+      enemyAttacks.forEach((attack) => {
+        if (gameField[attack.position.x][attack.position.y]) {
+          const cell = gameField[attack.position.x][attack.position.y];
+          if (cell) {
+            cell.isHit = true;
+          }
+        }
+      });
+
+      const cell = gameField[xAttack][yAttack];
+      if (cell) {
+        const ship = ships[cell.shipIndex];
+        if (ship) {
+          if (ship.length === 1) {
+            return 'killed';
+          }
+
+          let foundCellsHitWithShipId = 0;
+
+          for (let x = 0; x < gameField.length; x++) {
+            for (let y = 0; y < gameField[x].length; y++) {
+              const cellToFind = gameField[x][y];
+              if (cellToFind) {
+                if (cellToFind.shipIndex === cell.shipIndex && cellToFind.isHit) {
+                  foundCellsHitWithShipId += 1;
+                }
+              }
+            }
+          }
+
+          console.log('foundCellsHitWithShipId :>> ', foundCellsHitWithShipId);
+
+          if (foundCellsHitWithShipId + 1 >= ship.length) {
+            return 'killed';
+          }
+
+          return 'shot';
+        }
+      }
+
+      return 'miss';
+    };
+
     const processAttack = (ws: WebSocket, messageData: string) => {
       if (this.playerId === -1) {
         return;
@@ -318,9 +398,6 @@ export class ConnectionHandler {
         return;
       }
 
-      console.log('game.currentTurnPlayerId :>> ', game.currentTurnPlayerId);
-      console.log('this.playerId :>> ', this.playerId);
-
       if (game.currentTurnPlayerId !== this.playerId) {
         return;
       }
@@ -330,8 +407,6 @@ export class ConnectionHandler {
         return;
       }
 
-      const result = 'miss';
-
       const enemyId = playersId.filter((playerId) => playerId !== attackReq.indexPlayer)[0];
 
       const enemyGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(gameId, enemyId);
@@ -340,6 +415,8 @@ export class ConnectionHandler {
         return;
       }
 
+      const result = calculateAttack(enemyGameField, x, y);
+
       enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
 
       const newGameField = gameFieldRepository.update(enemyGameField.id, enemyGameField);
@@ -347,9 +424,6 @@ export class ConnectionHandler {
       if (!newGameField) {
         return;
       }
-
-      console.log(gameFieldRepository.findAll());
-
       playersId.forEach((playerId) => {
         const res = sendAttackResponseForPlayerWithId(playerId, getAttackDTO(x, y, attackReq.indexPlayer, result));
         return res;
@@ -430,7 +504,6 @@ export class ConnectionHandler {
       }
 
       const { x, y } = generatedAttack;
-      const result = 'miss';
 
       const enemyId = playersId.filter((playerId) => playerId !== randomAttackRequestDTO.indexPlayer)[0];
 
@@ -440,6 +513,8 @@ export class ConnectionHandler {
         return;
       }
 
+      const result = calculateAttack(enemyGameField, x, y);
+
       enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
 
       const newGameField = gameFieldRepository.update(enemyGameField.id, enemyGameField);
@@ -447,8 +522,6 @@ export class ConnectionHandler {
       if (!newGameField) {
         return;
       }
-
-      console.log(gameFieldRepository.findAll());
 
       playersId.forEach((playerId) => {
         const res = sendAttackResponseForPlayerWithId(
