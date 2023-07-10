@@ -25,6 +25,7 @@ export class WSServer {
       connectionHandler.onSendMessageToPlayerWithId = handler;
 
       ws.on('message', (data: Buffer) => connectionHandler.handleMessage(data));
+      ws.on('close', () => connectionHandler.onClose());
     };
 
     this.server.on('connection', wsConnectionHandler);

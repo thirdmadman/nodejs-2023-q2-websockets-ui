@@ -1,4 +1,5 @@
 import { WebSocket, WebSocketServer } from 'ws';
+import { FinishGameDTO } from './dto/response/FinishGameDTO';
 import { ChangePlayerTurnDTO } from './dto/response/ChangePlayerTurnDTO';
 import { gameFieldRepository } from './repository/GameFieldRepository';
 import { CreateGameDTO } from './dto/response/CreateGameDTO';
@@ -21,6 +22,7 @@ import { AttackRequestDTO } from './dto/request/AttackRequestDTO';
 import { AttackResponseDTO, TAttackStatus } from './dto/response/AttackResponseDTO';
 import { RandomAttackRequestDTO } from './dto/request/RandomAttackRequestDTO';
 import { getRandomInt } from './utils/utils';
+import { WinnerDTO } from './dto/response/WinnerDTO';
 
 export class ConnectionHandler {
   private ws: WebSocket;
@@ -58,29 +60,86 @@ export class ConnectionHandler {
       }
     };
 
+    const sendRegSuccess = (player: IPlayer) => {
+      const respData: PlayerResponseDTO = {
+        name: player.name,
+        index: player.id,
+        error: false,
+      };
+
+      try {
+        const playerResponseDTOSting = JSON.stringify(respData);
+        this.sendToPlayer('reg', playerResponseDTOSting);
+      } catch (err) {
+        console.error(err);
+      }
+
+      this.playerId = player.id;
+    };
+
+    const sendLoginNotSuccess = (player: IPlayer, reason: string) => {
+      const respData: PlayerResponseDTO = {
+        name: player.name,
+        index: player.id,
+        error: true,
+        errorText: reason,
+      };
+
+      try {
+        const playerResponseDTOSting = JSON.stringify(respData);
+        this.sendToPlayer('reg', playerResponseDTOSting);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
     const processReg = (ws: WebSocket, messageData: string) => {
       const playerReq = JSON.parse(messageData) as PlayerRequestDTO;
 
-      const newPlayer: IPlayer = { id: 1, name: playerReq.name, password: playerReq.password, score: 0 };
+      if (!playerReq || playerReq.name === undefined || playerReq.password === undefined) {
+        return;
+      }
+
+      if (playerReq.name.length < 5 || playerReq.password.length < 5) {
+        return;
+      }
+
+      const existingPlayer = playerRepository.findPlayerByName(playerReq.name);
+
+      const isPlayerExist = existingPlayer !== null;
+
+      if (isPlayerExist) {
+        if (existingPlayer.password !== playerReq.password) {
+          sendLoginNotSuccess(existingPlayer, 'Login failed: password incorrect');
+          return;
+        }
+
+        if (existingPlayer.isOnline) {
+          sendLoginNotSuccess(existingPlayer, 'Login failed: only one session is allowed');
+          return;
+        }
+
+        this.playerId = existingPlayer.id;
+        existingPlayer.isOnline = true;
+        playerRepository.update(existingPlayer.id, existingPlayer);
+        sendRegSuccess(existingPlayer);
+        return;
+      }
+
+      const newPlayer: IPlayer = {
+        id: 1,
+        name: playerReq.name,
+        password: playerReq.password,
+        score: 0,
+        isOnline: true,
+      };
+
       const result = playerRepository.create(newPlayer);
 
       console.log(playerRepository.findAll());
 
       if (result) {
-        const respData: PlayerResponseDTO = {
-          name: result.name,
-          index: result.id,
-          error: false,
-        };
-
-        try {
-          const playerResponseDTOSting = JSON.stringify(respData);
-          this.sendToPlayer('reg', playerResponseDTOSting);
-        } catch (err) {
-          console.error(err);
-        }
-
-        this.playerId = newPlayer.id;
+        sendRegSuccess(result);
       }
     };
 
@@ -612,6 +671,106 @@ export class ConnectionHandler {
       console.log(respMessage);
     } catch (e) {
       console.log(e);
+    }
+  }
+
+  onClose() {
+    console.log('onClose');
+
+    const playerId = this.getPlayerId();
+    console.log('playerId', playerId);
+    if (playerId === -1) {
+      return;
+    }
+
+    const existingPlayer = playerRepository.findOne(playerId);
+
+    if (existingPlayer) {
+      existingPlayer.isOnline = false;
+      playerRepository.update(existingPlayer.id, existingPlayer);
+    }
+
+    const game = gameRepository.findGameByPlayerId(playerId);
+
+    if (!game) {
+      return;
+    }
+
+    if (!game.playersId || game.playersId.length !== 2) {
+      return;
+    }
+
+    game.isFinished = true;
+
+    const result = gameRepository.update(game.id, game);
+
+    if (!result) {
+      return;
+    }
+
+    const enemyId = game.playersId.filter((id) => id !== playerId)[0];
+
+    const playerEnemy = playerRepository.findOne(enemyId);
+
+    if (!playerEnemy) {
+      return;
+    }
+
+    playerEnemy.score += 1;
+
+    const res = playerRepository.update(playerEnemy.id, playerEnemy);
+
+    if (!res) {
+      return;
+    }
+
+    this.sendPlayerWin(game.id, enemyId);
+  }
+
+  sendPlayerWin(gameId: number, winnerPlayerId: number) {
+    const res: FinishGameDTO = {
+      winPlayer: winnerPlayerId,
+    };
+
+    try {
+      const stringFinishGameDTO = JSON.stringify(res);
+
+      const game = gameRepository.findOne(gameId);
+      if (!game) {
+        return;
+      }
+
+      const players = game.playersId;
+
+      players.forEach((playerId) => this.onSendMessageToPlayerWithId(playerId, 'finish', stringFinishGameDTO));
+    } catch (err) {
+      console.error(err);
+    }
+
+    this.updateWinners();
+  }
+
+  updateWinners() {
+    const players = playerRepository.findAll();
+    if (!players || players.length === 0) {
+      return;
+    }
+
+    const winners = players.filter((player) => player.score > 0);
+
+    if (!winners || winners.length === 0) {
+      return;
+    }
+
+    const winnersDTO: Array<WinnerDTO> = winners
+      .map((winner) => ({ name: winner.name, wins: winner.score }))
+      .sort((a, b) => a.wins - b.wins);
+
+    try {
+      const winnersDTOString = JSON.stringify(winnersDTO);
+      this.sendToAll('update_winners', winnersDTOString);
+    } catch (err) {
+      console.error(err);
     }
   }
 }
