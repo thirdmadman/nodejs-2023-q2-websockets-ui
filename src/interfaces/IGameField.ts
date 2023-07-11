@@ -5,7 +5,7 @@ export interface IGameFieldShip {
     x: number;
     y: number;
   };
-  direction: boolean;
+  direction: boolean; // false = horizontal, true = vertically
   length: number;
   type: 'small' | 'medium' | 'large' | 'huge';
 }
