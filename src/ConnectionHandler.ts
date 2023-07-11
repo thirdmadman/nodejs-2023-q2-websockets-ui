@@ -438,11 +438,6 @@ export class ConnectionHandler {
       let maxVertical = isVertical ? ship.position.y + ship.length + 1 : ship.position.y + 2;
       maxVertical = maxVertical > 10 ? 10 : maxVertical;
 
-      console.log('maxVertical :>> ', maxVertical);
-      console.log('maxHorizontal :>> ', maxHorizontal);
-      console.log('x, y :>> ', xAttack, yAttack);
-      console.log('length :>> ', ship.length);
-
       const minHorizontal = ship.position.x > 0 ? ship.position.x - 1 : 0;
       const minVertical = ship.position.y > 0 ? ship.position.y - 1 : 0;
 
@@ -481,6 +476,53 @@ export class ConnectionHandler {
         sendAttackResponseForPlayerWithId(attackedPlayerId, attackedDTO);
 
         const attackerDTO = getAttackDTO(attack.position.x, attack.position.y, attackerPlayerId, 'miss');
+        sendAttackResponseForPlayerWithId(attackerPlayerId, attackerDTO);
+      });
+    };
+
+    const markShipAsDead = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number) => {
+      const gameField = getConvertedGameField(attackedPlayerGameField);
+
+      const cell = gameField[xAttack][yAttack];
+
+      if (!cell) {
+        return;
+      }
+
+      const { shipIndex } = cell;
+
+      const ship = attackedPlayerGameField.ships[shipIndex];
+
+      if (ship.length === 1) {
+        return;
+      }
+
+      const shipCells = new Array<IGameFieldEnemyAttack>();
+
+      for (let i = 0; i < ship.length; i++) {
+        if (ship.direction) {
+          shipCells.push({ position: { x: ship.position.x, y: ship.position.y + i } });
+        } else {
+          shipCells.push({ position: { x: ship.position.x + i, y: ship.position.y } });
+        }
+      }
+
+      const game = gameRepository.findOne(attackedPlayerGameField.gameId);
+
+      if (!game) {
+        return;
+      }
+
+      const { playersId } = game;
+
+      const attackedPlayerId = attackedPlayerGameField.playerId;
+      const attackerPlayerId = playersId.filter((id) => id !== attackedPlayerId)[0];
+
+      shipCells.forEach((attack) => {
+        const attackedDTO = getAttackDTO(attack.position.x, attack.position.y, attackerPlayerId, 'killed');
+        sendAttackResponseForPlayerWithId(attackedPlayerId, attackedDTO);
+
+        const attackerDTO = getAttackDTO(attack.position.x, attack.position.y, attackerPlayerId, 'killed');
         sendAttackResponseForPlayerWithId(attackerPlayerId, attackerDTO);
       });
     };
@@ -588,6 +630,7 @@ export class ConnectionHandler {
 
       if (result === 'killed') {
         markAllNeighborCellsAsMiss(newGameField, x, y);
+        markShipAsDead(newGameField, x, y);
       }
 
       playersId.forEach((playerId) => {
@@ -691,6 +734,11 @@ export class ConnectionHandler {
         );
         return res;
       });
+
+      if (result === 'killed') {
+        markAllNeighborCellsAsMiss(newGameField, x, y);
+        markShipAsDead(newGameField, x, y);
+      }
 
       playersId.forEach((playerId) => {
         const res = sendPlayerTurnByPlayerId(enemyId, playerId);
