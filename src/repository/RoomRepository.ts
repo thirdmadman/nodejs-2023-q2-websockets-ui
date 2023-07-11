@@ -9,7 +9,7 @@ class RoomRepository extends GenericRepository<IRoom> {
       return null;
     }
 
-    const playerOwnRooms = allRooms.filter((room) => room.playersId[0] === playerId);
+    const playerOwnRooms = allRooms.filter((room) => room.ownerPlayerId === playerId);
 
     if (!playerOwnRooms || playerOwnRooms.length === 0) {
       return null;
