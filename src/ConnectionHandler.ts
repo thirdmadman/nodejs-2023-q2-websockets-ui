@@ -359,13 +359,14 @@ export class ConnectionHandler {
       return attackDTO;
     };
 
-    const calculateAttack = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number): TAttackStatus => {
-      const { ships, enemyAttacks } = attackedPlayerGameField;
+    interface TGameFieldCell {
+      shipIndex: number;
+      isHit: boolean;
+      isMiss: boolean;
+    }
 
-      type TGameFieldCell = {
-        shipIndex: number;
-        isHit: boolean;
-      };
+    const getConvertedGameField = (attackedPlayerGameField: IGameField) => {
+      const { ships, enemyAttacks } = attackedPlayerGameField;
 
       const copy = new Array<TGameFieldCell | null>(10);
       const nodes = new Array<typeof copy>(10);
@@ -386,11 +387,13 @@ export class ConnectionHandler {
             gameField[ship.position.x][ship.position.y + i] = {
               shipIndex: index,
               isHit: false,
+              isMiss: false,
             };
           } else {
             gameField[ship.position.x + i][ship.position.y] = {
               shipIndex: index,
               isHit: false,
+              isMiss: false,
             };
           }
         }
@@ -401,9 +404,90 @@ export class ConnectionHandler {
           const cell = gameField[attack.position.x][attack.position.y];
           if (cell) {
             cell.isHit = true;
+          } else {
+            gameField[attack.position.x][attack.position.y] = {
+              shipIndex: -1,
+              isHit: false,
+              isMiss: true,
+            };
           }
         }
       });
+
+      return gameField;
+    };
+
+    const markAllNeighborCellsAsMiss = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number) => {
+      const gameField = getConvertedGameField(attackedPlayerGameField);
+
+      const cell = gameField[xAttack][yAttack];
+
+      if (!cell) {
+        return;
+      }
+
+      const { shipIndex } = cell;
+
+      const ship = attackedPlayerGameField.ships[shipIndex];
+
+      const isVertical = ship.direction;
+
+      let maxHorizontal = isVertical ? ship.position.x + 2 : ship.position.x + ship.length + 1;
+      maxHorizontal = maxHorizontal > 10 ? 10 : maxHorizontal;
+
+      let maxVertical = isVertical ? ship.position.y + ship.length + 1 : ship.position.y + 2;
+      maxVertical = maxVertical > 10 ? 10 : maxVertical;
+
+      console.log('maxVertical :>> ', maxVertical);
+      console.log('maxHorizontal :>> ', maxHorizontal);
+      console.log('x, y :>> ', xAttack, yAttack);
+      console.log('length :>> ', ship.length);
+
+      const minHorizontal = ship.position.x > 0 ? ship.position.x - 1 : 0;
+      const minVertical = ship.position.y > 0 ? ship.position.y - 1 : 0;
+
+      const newAttacks = new Array<IGameFieldEnemyAttack>();
+
+      for (let xSearch = minHorizontal; xSearch < maxHorizontal; xSearch += 1) {
+        for (let ySearch = minVertical; ySearch < maxVertical; ySearch += 1) {
+          if (gameField[xSearch] && gameField[xSearch][ySearch] !== undefined) {
+            const cellFound = gameField[xSearch][ySearch];
+            if (cellFound === null) {
+              newAttacks.push({ position: { x: xSearch, y: ySearch } });
+            }
+          }
+        }
+      }
+
+      const newGameField = { ...attackedPlayerGameField };
+
+      newGameField.enemyAttacks = [...newGameField.enemyAttacks, ...newAttacks];
+
+      gameFieldRepository.update(newGameField.id, newGameField);
+
+      const game = gameRepository.findOne(newGameField.gameId);
+
+      if (!game) {
+        return;
+      }
+
+      const { playersId } = game;
+
+      const attackedPlayerId = attackedPlayerGameField.playerId;
+      const attackerPlayerId = playersId.filter((id) => id !== attackedPlayerId)[0];
+
+      newAttacks.forEach((attack) => {
+        const attackedDTO = getAttackDTO(attack.position.x, attack.position.y, attackerPlayerId, 'miss');
+        sendAttackResponseForPlayerWithId(attackedPlayerId, attackedDTO);
+
+        const attackerDTO = getAttackDTO(attack.position.x, attack.position.y, attackerPlayerId, 'miss');
+        sendAttackResponseForPlayerWithId(attackerPlayerId, attackerDTO);
+      });
+    };
+
+    const calculateAttack = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number): TAttackStatus => {
+      const { ships } = attackedPlayerGameField;
+      const gameField = getConvertedGameField(attackedPlayerGameField);
 
       const cell = gameField[xAttack][yAttack];
       if (cell) {
@@ -474,6 +558,19 @@ export class ConnectionHandler {
         return;
       }
 
+      // const getIsAttackExists = (xFind: number, yFind: number, enemyAttacks: Array<IGameFieldEnemyAttack>) => {
+      //   const isHasBeenAttacked = enemyAttacks.find(
+      //     (attack) => attack.position.x === xFind && attack.position.y === yFind,
+      //   );
+      //   return isHasBeenAttacked !== undefined;
+      // };
+
+      // const IsAttackExists = getIsAttackExists(x, y, enemyGameField.enemyAttacks);
+
+      // if (IsAttackExists) {
+      //   return;
+      // }
+
       const result = calculateAttack(enemyGameField, x, y);
 
       enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
@@ -483,10 +580,15 @@ export class ConnectionHandler {
       if (!newGameField) {
         return;
       }
+
       playersId.forEach((playerId) => {
         const res = sendAttackResponseForPlayerWithId(playerId, getAttackDTO(x, y, attackReq.indexPlayer, result));
         return res;
       });
+
+      if (result === 'killed') {
+        markAllNeighborCellsAsMiss(newGameField, x, y);
+      }
 
       playersId.forEach((playerId) => {
         const res = sendPlayerTurnByPlayerId(enemyId, playerId);
