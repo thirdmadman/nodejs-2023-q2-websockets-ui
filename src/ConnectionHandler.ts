@@ -37,29 +37,6 @@ export class ConnectionHandler {
     this.ws = webSocket;
     this.wsServer = webSocketServer;
 
-    const updateRooms = () => {
-      const rooms = roomRepository.findAll();
-      const roomPlayers = (room: IRoom) => {
-        const players: Array<RoomUser> = [];
-        room.playersId.forEach((id, i) => {
-          const player = playerRepository.findOne(id);
-          if (player) {
-            players.push({ name: player.name, index: i } as RoomUser);
-          }
-        });
-        return players;
-      };
-      console.log(rooms);
-
-      const roomsDTO = rooms.map((room) => ({ roomId: room.id, roomUsers: roomPlayers(room) }) as RoomDTO);
-      try {
-        const roomsDTOSting = JSON.stringify(roomsDTO);
-        this.sendToAll('update_room', roomsDTOSting);
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
     const sendRegSuccess = (player: IPlayer) => {
       const respData: PlayerResponseDTO = {
         name: player.name,
@@ -148,11 +125,11 @@ export class ConnectionHandler {
         return;
       }
 
-      const newRoom: IRoom = { id: 0, playersId: [this.playerId], isInGame: false };
+      const newRoom: IRoom = { id: 0, playersId: [this.playerId], isInGame: false, ownerPlayerId: this.playerId };
       const result = roomRepository.create(newRoom);
 
       if (result) {
-        updateRooms();
+        this.updateRooms();
       }
     };
 
@@ -217,7 +194,7 @@ export class ConnectionHandler {
         console.log(e);
       }
 
-      updateRooms();
+      this.updateRooms();
     };
 
     const sendStartGameWithIdForPlayerId = (gameId: number, playerId: number) => {
@@ -824,6 +801,28 @@ export class ConnectionHandler {
     }
   }
 
+  updateRooms() {
+    const rooms = roomRepository.findAll();
+    const roomPlayers = (room: IRoom) => {
+      const players: Array<RoomUser> = [];
+      room.playersId.forEach((id, i) => {
+        const player = playerRepository.findOne(id);
+        if (player) {
+          players.push({ name: player.name, index: i } as RoomUser);
+        }
+      });
+      return players;
+    };
+
+    const roomsDTO = rooms.map((room) => ({ roomId: room.id, roomUsers: roomPlayers(room) }) as RoomDTO);
+    try {
+      const roomsDTOSting = JSON.stringify(roomsDTO);
+      this.sendToAll('update_room', roomsDTOSting);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   onClose() {
     console.log('onClose');
 
@@ -840,41 +839,59 @@ export class ConnectionHandler {
       playerRepository.update(existingPlayer.id, existingPlayer);
     }
 
-    const game = gameRepository.findGameByPlayerId(playerId);
+    const finishGame = (playerIdToFinish: number) => {
+      const game = gameRepository.findGameByPlayerId(playerIdToFinish);
 
-    if (!game) {
-      return;
-    }
+      if (!game) {
+        return;
+      }
 
-    if (!game.playersId || game.playersId.length !== 2) {
-      return;
-    }
+      if (!game.playersId || game.playersId.length !== 2) {
+        return;
+      }
 
-    game.isFinished = true;
+      game.isFinished = true;
 
-    const result = gameRepository.update(game.id, game);
+      const result = gameRepository.update(game.id, game);
 
-    if (!result) {
-      return;
-    }
+      if (!result) {
+        return;
+      }
 
-    const enemyId = game.playersId.filter((id) => id !== playerId)[0];
+      const enemyId = game.playersId.filter((id) => id !== playerIdToFinish)[0];
 
-    const playerEnemy = playerRepository.findOne(enemyId);
+      const playerEnemy = playerRepository.findOne(enemyId);
 
-    if (!playerEnemy) {
-      return;
-    }
+      if (!playerEnemy) {
+        return;
+      }
 
-    playerEnemy.score += 1;
+      playerEnemy.score += 1;
 
-    const res = playerRepository.update(playerEnemy.id, playerEnemy);
+      const res = playerRepository.update(playerEnemy.id, playerEnemy);
 
-    if (!res) {
-      return;
-    }
+      if (!res) {
+        return;
+      }
 
-    this.sendPlayerWin(game.id, enemyId);
+      this.sendPlayerWin(game.id, enemyId);
+    };
+
+    const closeOwnRoom = (playerIdToClose: number) => {
+      const rooms = roomRepository.findAllOwnRoomsByPlayerId(playerIdToClose);
+
+      if (!rooms) {
+        return;
+      }
+
+      rooms.forEach((room) => roomRepository.delete(room.id));
+
+      this.updateRooms();
+    };
+
+    closeOwnRoom(playerId);
+
+    finishGame(playerId);
   }
 
   sendPlayerWin(gameId: number, winnerPlayerId: number) {
