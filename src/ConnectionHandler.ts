@@ -224,7 +224,7 @@ export class ConnectionHandler {
       }
     };
 
-    const changePlayerTurn = (gameId: number, playerIdTurn: number) => {
+    const changePlayerTurn = (gameId: number) => {
       const game = gameRepository.findOne(gameId);
 
       if (!game) {
@@ -237,16 +237,17 @@ export class ConnectionHandler {
         return;
       }
 
-      const isPlayerIdInGame = playersId.find((id) => id === playerIdTurn) !== undefined;
+      const { currentTurnPlayerId } = game;
 
-      if (!isPlayerIdInGame) {
+      const nextPlayerIdInGame = playersId.find((id) => id !== currentTurnPlayerId);
+
+      if (!nextPlayerIdInGame) {
         return;
       }
 
-      game.playersId = [...playersId];
-      game.currentTurnPlayerId = playerIdTurn;
+      game.currentTurnPlayerId = nextPlayerIdInGame;
 
-      gameRepository.update(gameId, game);
+      gameRepository.update(gameId, { ...game });
     };
 
     const sendPlayerTurnByPlayerId = (playerIdTurn: number, playerId: number) => {
@@ -504,6 +505,25 @@ export class ConnectionHandler {
       });
     };
 
+    const isAllShipsAreDead = (attackedPlayerGameField: IGameField) => {
+      const { ships } = attackedPlayerGameField;
+
+      const gameField = getConvertedGameField(attackedPlayerGameField);
+
+      let shipDeadCount = 0;
+
+      for (let i = 0; i < ships.length; i += 1) {
+        const shipCells = gameField.flat().filter((cell) => cell?.shipIndex === i);
+        const intactCells = shipCells.filter((cell) => cell?.isHit === false);
+        if (!intactCells || intactCells.length === 0) {
+          shipDeadCount += 1;
+          break;
+        }
+      }
+
+      return shipDeadCount >= 10;
+    };
+
     const calculateAttack = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number): TAttackStatus => {
       const { ships } = attackedPlayerGameField;
       const gameField = getConvertedGameField(attackedPlayerGameField);
@@ -560,7 +580,7 @@ export class ConnectionHandler {
         return;
       }
 
-      if (game.currentTurnPlayerId !== this.playerId) {
+      if (game.currentTurnPlayerId !== this.getPlayerId()) {
         return;
       }
 
@@ -577,27 +597,30 @@ export class ConnectionHandler {
         return;
       }
 
-      // const getIsAttackExists = (xFind: number, yFind: number, enemyAttacks: Array<IGameFieldEnemyAttack>) => {
-      //   const isHasBeenAttacked = enemyAttacks.find(
-      //     (attack) => attack.position.x === xFind && attack.position.y === yFind,
-      //   );
-      //   return isHasBeenAttacked !== undefined;
-      // };
+      const getIsAttackExists = (xFind: number, yFind: number, enemyAttacks: Array<IGameFieldEnemyAttack>) => {
+        const isHasBeenAttacked = enemyAttacks.find(
+          (attack) => attack.position.x === xFind && attack.position.y === yFind,
+        );
+        return isHasBeenAttacked !== undefined;
+      };
 
-      // const IsAttackExists = getIsAttackExists(x, y, enemyGameField.enemyAttacks);
-
-      // if (IsAttackExists) {
-      //   return;
-      // }
+      const isAttackExists = getIsAttackExists(x, y, enemyGameField.enemyAttacks);
 
       const result = calculateAttack(enemyGameField, x, y);
 
-      enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
+      if (!isAttackExists) {
+        enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
 
-      const newGameField = gameFieldRepository.update(enemyGameField.id, enemyGameField);
+        const newGameField = gameFieldRepository.update(enemyGameField.id, enemyGameField);
 
-      if (!newGameField) {
-        return;
+        if (!newGameField) {
+          return;
+        }
+
+        if (result === 'killed') {
+          markAllNeighborCellsAsMiss(newGameField, x, y);
+          markShipAsDead(newGameField, x, y);
+        }
       }
 
       playersId.forEach((playerId) => {
@@ -605,17 +628,20 @@ export class ConnectionHandler {
         return res;
       });
 
-      if (result === 'killed') {
-        markAllNeighborCellsAsMiss(newGameField, x, y);
-        markShipAsDead(newGameField, x, y);
+      if (isAllShipsAreDead(enemyGameField)) {
+        this.sendPlayerWin(game.id, this.playerId);
+        return;
       }
 
+      if (result === 'killed' || result === 'shot') {
+        return;
+      }
+
+      changePlayerTurn(game.id);
       playersId.forEach((playerId) => {
         const res = sendPlayerTurnByPlayerId(enemyId, playerId);
         return res;
       });
-
-      changePlayerTurn(game.id, enemyId);
     };
 
     const generateRandomAttackByPlayerIdAndGameId = (playerId: number, gameId: number) => {
@@ -717,12 +743,12 @@ export class ConnectionHandler {
         markShipAsDead(newGameField, x, y);
       }
 
+      changePlayerTurn(game.id);
+
       playersId.forEach((playerId) => {
         const res = sendPlayerTurnByPlayerId(enemyId, playerId);
         return res;
       });
-
-      changePlayerTurn(game.id, enemyId);
     };
 
     const { router } = this;
@@ -757,7 +783,7 @@ export class ConnectionHandler {
         return;
       }
 
-      console.log('received: %s', message);
+      console.log(`received from playerId= ${this.getPlayerId()}: `, message);
 
       this.router.handle(message.type, this.ws, message.data);
     } catch (e) {
@@ -824,10 +850,7 @@ export class ConnectionHandler {
   }
 
   onClose() {
-    console.log('onClose');
-
     const playerId = this.getPlayerId();
-    console.log('playerId', playerId);
     if (playerId === -1) {
       return;
     }
