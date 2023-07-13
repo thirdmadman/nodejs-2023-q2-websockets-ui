@@ -100,6 +100,8 @@ export class ConnectionHandler {
         existingPlayer.isOnline = true;
         playerRepository.update(existingPlayer.id, existingPlayer);
         sendRegSuccess(existingPlayer);
+        this.updateRooms();
+        this.updateWinners();
         return;
       }
 
@@ -116,20 +118,26 @@ export class ConnectionHandler {
       console.log(playerRepository.findAll());
 
       if (result) {
+        this.updateRooms();
+        this.updateWinners();
         sendRegSuccess(result);
       }
     };
 
     const processCreateRoom = (ws: WebSocket, messageData: string) => {
-      if (this.playerId < 0) {
+      if (this.getPlayerId() < 0) {
         return;
       }
 
-      const newRoom: IRoom = { id: 0, playersId: [this.playerId], isInGame: false, ownerPlayerId: this.playerId };
-      const result = roomRepository.create(newRoom);
+      const currentRoom = roomRepository.findAllOwnRoomsByPlayerId(this.getPlayerId());
 
-      if (result) {
-        this.updateRooms();
+      if (!currentRoom) {
+        const newRoom: IRoom = { id: 0, playersId: [this.playerId], isInGame: false, ownerPlayerId: this.playerId };
+        const result = roomRepository.create(newRoom);
+
+        if (result) {
+          this.updateRooms();
+        }
       }
     };
 
