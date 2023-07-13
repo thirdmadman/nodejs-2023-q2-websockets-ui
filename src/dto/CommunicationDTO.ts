@@ -11,6 +11,7 @@ export const AllCommunicationDTOTypes = [
   'finish',
   'update_room',
   'update_winners',
+  'single_play',
 ] as const;
 export type CommunicationDTOTypes = (typeof AllCommunicationDTOTypes)[number];
 export interface CommunicationDTO {
