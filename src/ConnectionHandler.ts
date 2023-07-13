@@ -228,26 +228,26 @@ export class ConnectionHandler {
       const game = gameRepository.findOne(gameId);
 
       if (!game) {
-        return;
+        return null;
       }
 
       const { playersId } = game;
 
       if (!playersId || playersId.length !== 2) {
-        return;
+        return null;
       }
 
       const { currentTurnPlayerId } = game;
 
       const nextPlayerIdInGame = playersId.find((id) => id !== currentTurnPlayerId);
 
-      if (!nextPlayerIdInGame) {
-        return;
+      if (nextPlayerIdInGame === undefined) {
+        return null;
       }
 
       game.currentTurnPlayerId = nextPlayerIdInGame;
 
-      gameRepository.update(gameId, { ...game });
+      return gameRepository.update(gameId, { ...game });
     };
 
     const sendPlayerTurnByPlayerId = (playerIdTurn: number, playerId: number) => {
@@ -395,6 +395,13 @@ export class ConnectionHandler {
       return gameField;
     };
 
+    const getIsAttackExists = (xFind: number, yFind: number, enemyAttacks: Array<IGameFieldEnemyAttack>) => {
+      const isHasBeenAttacked = enemyAttacks.find(
+        (attack) => attack.position.x === xFind && attack.position.y === yFind,
+      );
+      return isHasBeenAttacked !== undefined;
+    };
+
     const markAllNeighborCellsAsMiss = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number) => {
       const gameField = getConvertedGameField(attackedPlayerGameField);
 
@@ -517,10 +524,8 @@ export class ConnectionHandler {
         const intactCells = shipCells.filter((cell) => cell?.isHit === false);
         if (!intactCells || intactCells.length === 0) {
           shipDeadCount += 1;
-          break;
         }
       }
-
       return shipDeadCount >= 10;
     };
 
@@ -548,8 +553,6 @@ export class ConnectionHandler {
               }
             }
           }
-
-          console.log('foundCellsHitWithShipId :>> ', foundCellsHitWithShipId);
 
           if (foundCellsHitWithShipId + 1 >= ship.length) {
             return 'killed';
@@ -591,18 +594,11 @@ export class ConnectionHandler {
 
       const enemyId = playersId.filter((playerId) => playerId !== attackReq.indexPlayer)[0];
 
-      const enemyGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(gameId, enemyId);
+      let enemyGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(gameId, enemyId);
 
       if (!enemyGameField) {
         return;
       }
-
-      const getIsAttackExists = (xFind: number, yFind: number, enemyAttacks: Array<IGameFieldEnemyAttack>) => {
-        const isHasBeenAttacked = enemyAttacks.find(
-          (attack) => attack.position.x === xFind && attack.position.y === yFind,
-        );
-        return isHasBeenAttacked !== undefined;
-      };
 
       const isAttackExists = getIsAttackExists(x, y, enemyGameField.enemyAttacks);
 
@@ -616,6 +612,8 @@ export class ConnectionHandler {
         if (!newGameField) {
           return;
         }
+
+        enemyGameField = newGameField;
 
         if (result === 'killed') {
           markAllNeighborCellsAsMiss(newGameField, x, y);
@@ -637,9 +635,12 @@ export class ConnectionHandler {
         return;
       }
 
-      changePlayerTurn(game.id);
+      const updatedGame = changePlayerTurn(game.id);
+      if (!updatedGame) {
+        return;
+      }
       playersId.forEach((playerId) => {
-        const res = sendPlayerTurnByPlayerId(enemyId, playerId);
+        const res = sendPlayerTurnByPlayerId(updatedGame.currentTurnPlayerId, playerId);
         return res;
       });
     };
@@ -656,13 +657,6 @@ export class ConnectionHandler {
 
       let x = 0;
       let y = 0;
-
-      const getIsAttackExists = (xFind: number, yFind: number, enemyAttacks: Array<IGameFieldEnemyAttack>) => {
-        const isHasBeenAttacked = enemyAttacks.find(
-          (attack) => attack.position.x === xFind && attack.position.y === yFind,
-        );
-        return isHasBeenAttacked !== undefined;
-      };
 
       while (!found) {
         x = getRandomInt(0, 9);
@@ -743,10 +737,12 @@ export class ConnectionHandler {
         markShipAsDead(newGameField, x, y);
       }
 
-      changePlayerTurn(game.id);
-
+      const updatedGame = changePlayerTurn(game.id);
+      if (!updatedGame) {
+        return;
+      }
       playersId.forEach((playerId) => {
-        const res = sendPlayerTurnByPlayerId(enemyId, playerId);
+        const res = sendPlayerTurnByPlayerId(updatedGame.currentTurnPlayerId, playerId);
         return res;
       });
     };
