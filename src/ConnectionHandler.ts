@@ -535,7 +535,7 @@ export class ConnectionHandler {
       return shipDeadCount >= 10;
     };
 
-    const calculateAttack = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number): TAttackStatus => {
+    const calculateAttack = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number) => {
       const { ships } = attackedPlayerGameField;
       const gameField = getConvertedGameField(attackedPlayerGameField);
 
@@ -571,12 +571,32 @@ export class ConnectionHandler {
       return 'miss';
     };
 
-    const finishGame = (gameId: number) => {
-      const game = gameRepository.findOne(gameId);
-      if (!game) {
-        return;
+    const generateRandomAttackByPlayerIdAndGameId = (playerId: number, gameId: number) => {
+      const gameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(gameId, playerId);
+
+      if (!gameField) {
+        return null;
       }
-      gameRepository.update(game.id, { ...game, isFinished: true });
+
+      let found = false;
+      let counter = 0;
+
+      let x = 0;
+      let y = 0;
+
+      while (!found) {
+        x = getRandomInt(0, 9);
+        y = getRandomInt(0, 9);
+
+        found = !getIsAttackExists(x, y, gameField.enemyAttacks);
+        counter += 1;
+
+        if (counter > 99) {
+          break;
+        }
+      }
+
+      return { x, y };
     };
 
     const processAttack = (ws: WebSocket, messageData: string) => {
@@ -618,6 +638,11 @@ export class ConnectionHandler {
 
       const result = calculateAttack(enemyGameField, x, y);
 
+      playersId.forEach((playerId) => {
+        const res = sendAttackResponseForPlayerWithId(playerId, getAttackDTO(x, y, attackReq.indexPlayer, result));
+        return res;
+      });
+
       if (!isAttackExists) {
         enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
 
@@ -635,19 +660,79 @@ export class ConnectionHandler {
         }
       }
 
-      playersId.forEach((playerId) => {
-        const res = sendAttackResponseForPlayerWithId(playerId, getAttackDTO(x, y, attackReq.indexPlayer, result));
-        return res;
-      });
-
       if (isAllShipsAreDead(enemyGameField)) {
         this.finishGame(game.id);
-        this.updateWinnerPlayerScore(this.getPlayerId());
+        if (enemyId !== -100) {
+          this.updateWinnerPlayerScore(this.getPlayerId());
+        }
         this.sendPlayerWin(game.id, this.getPlayerId());
         return;
       }
 
       if (result === 'killed' || result === 'shot') {
+        playersId.forEach((playerId) => {
+          const res = sendPlayerTurnByPlayerId(this.getPlayerId(), playerId);
+          return res;
+        });
+        return;
+      }
+
+      if (enemyId === -100) {
+        const performBotAttack = () => {
+          sendPlayerTurnByPlayerId(-100, this.getPlayerId());
+
+          const playerGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(game.id, this.getPlayerId());
+
+          if (!playerGameField) {
+            return null;
+          }
+
+          const botRandomAttack = generateRandomAttackByPlayerIdAndGameId(this.getPlayerId(), game.id);
+          if (!botRandomAttack) {
+            return null;
+          }
+
+          const botAttackResult = calculateAttack(playerGameField, botRandomAttack.x, botRandomAttack.y);
+
+          playerGameField.enemyAttacks = [
+            ...playerGameField.enemyAttacks,
+            { position: { x: botRandomAttack.x, y: botRandomAttack.y } },
+          ];
+
+          const newPlayerGameField = gameFieldRepository.update(playerGameField.id, playerGameField);
+
+          if (!newPlayerGameField) {
+            return null;
+          }
+
+          sendAttackResponseForPlayerWithId(
+            this.getPlayerId(),
+            getAttackDTO(botRandomAttack.x, botRandomAttack.y, -100, botAttackResult),
+          );
+
+          if (botAttackResult === 'killed') {
+            markAllNeighborCellsAsMiss(newPlayerGameField, botRandomAttack.x, botRandomAttack.y);
+            markShipAsDead(newPlayerGameField, botRandomAttack.x, botRandomAttack.y);
+          }
+
+          return botAttackResult;
+        };
+
+        let resultOfCurrentBotAttack = performBotAttack();
+
+        while (resultOfCurrentBotAttack === 'killed' || resultOfCurrentBotAttack === 'shot') {
+          resultOfCurrentBotAttack = performBotAttack();
+
+          const playerGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(game.id, this.getPlayerId());
+
+          if (playerGameField && isAllShipsAreDead(playerGameField)) {
+            this.finishGame(game.id);
+            this.sendPlayerWin(game.id, -100);
+            return;
+          }
+        }
+
+        sendPlayerTurnByPlayerId(this.getPlayerId(), this.getPlayerId());
         return;
       }
 
@@ -659,34 +744,6 @@ export class ConnectionHandler {
         const res = sendPlayerTurnByPlayerId(updatedGame.currentTurnPlayerId, playerId);
         return res;
       });
-    };
-
-    const generateRandomAttackByPlayerIdAndGameId = (playerId: number, gameId: number) => {
-      const gameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(gameId, playerId);
-
-      if (!gameField) {
-        return null;
-      }
-
-      let found = false;
-      let counter = 0;
-
-      let x = 0;
-      let y = 0;
-
-      while (!found) {
-        x = getRandomInt(0, 9);
-        y = getRandomInt(0, 9);
-
-        found = !getIsAttackExists(x, y, gameField.enemyAttacks);
-        counter += 1;
-
-        if (counter > 99) {
-          break;
-        }
-      }
-
-      return { x, y };
     };
 
     const processRandomAttack = (ws: WebSocket, messageData: string) => {
@@ -771,6 +828,54 @@ export class ConnectionHandler {
       });
     };
 
+    const processStartSinglePlay = (ws: WebSocket, messageData: string) => {
+      const game: IGame = {
+        id: 0,
+        playersId: [-100, this.getPlayerId()],
+        currentTurnPlayerId: this.getPlayerId(),
+        isFinished: false,
+      };
+
+      const createGameResult = gameRepository.create(game);
+
+      if (!createGameResult) {
+        return;
+      }
+
+      const playerCreateGameDTO: CreateGameDTO = {
+        idGame: createGameResult.id,
+        idPlayer: this.getPlayerId(),
+      };
+
+      try {
+        const playerCreateGameDTOString = JSON.stringify(playerCreateGameDTO);
+        this.sendToPlayer('create_game', playerCreateGameDTOString);
+      } catch (e) {
+        console.error(e);
+      }
+
+      const botGameField: IGameField = {
+        id: 0,
+        gameId: createGameResult.id,
+        playerId: -100,
+        ships: [
+          { position: { x: 2, y: 5 }, direction: false, type: 'huge', length: 4 },
+          { position: { x: 7, y: 5 }, direction: true, type: 'large', length: 3 },
+          { position: { x: 1, y: 8 }, direction: false, type: 'large', length: 3 },
+          { position: { x: 9, y: 3 }, direction: true, type: 'medium', length: 2 },
+          { position: { x: 7, y: 0 }, direction: true, type: 'medium', length: 2 },
+          { position: { x: 9, y: 0 }, direction: true, type: 'medium', length: 2 },
+          { position: { x: 2, y: 3 }, direction: false, type: 'small', length: 1 },
+          { position: { x: 0, y: 1 }, direction: false, type: 'small', length: 1 },
+          { position: { x: 6, y: 3 }, direction: true, type: 'small', length: 1 },
+          { position: { x: 8, y: 9 }, direction: true, type: 'small', length: 1 },
+        ],
+        enemyAttacks: [],
+      };
+
+      gameFieldRepository.create(botGameField);
+    };
+
     const { router } = this;
 
     router.addRoute('reg', (ws: WebSocket, messageData: string) => processReg(ws, messageData));
@@ -779,6 +884,7 @@ export class ConnectionHandler {
     router.addRoute('add_ships', (ws: WebSocket, messageData: string) => processAddShips(ws, messageData));
     router.addRoute('attack', (ws: WebSocket, messageData: string) => processAttack(ws, messageData));
     router.addRoute('randomAttack', (ws: WebSocket, messageData: string) => processRandomAttack(ws, messageData));
+    router.addRoute('single_play', (ws: WebSocket, messageData: string) => processStartSinglePlay(ws, messageData));
   }
 
   onSendMessageToPlayerWithId = (playerId: number, messageType: CommunicationDTOTypes, message: string) => null;
