@@ -979,7 +979,7 @@ export class ConnectionHandler {
 
     const winnersDTO: Array<WinnerDTO> = winners
       .map((winner) => ({ name: winner.name, wins: winner.score }))
-      .sort((a, b) => a.wins - b.wins);
+      .sort((a, b) => b.wins - a.wins);
 
     try {
       const winnersDTOString = JSON.stringify(winnersDTO);
