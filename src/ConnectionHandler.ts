@@ -115,8 +115,6 @@ export class ConnectionHandler {
 
       const result = playerRepository.create(newPlayer);
 
-      console.log(playerRepository.findAll());
-
       if (result) {
         this.updateRooms();
         this.updateWinners();
@@ -199,7 +197,7 @@ export class ConnectionHandler {
         this.sendToPlayer('create_game', playerCreateGameDTOString);
         this.onSendMessageToPlayerWithId(enemyId, 'create_game', enemyCreateGameDTOString);
       } catch (e) {
-        console.log(e);
+        console.error(e);
       }
 
       this.updateRooms();
@@ -809,7 +807,7 @@ export class ConnectionHandler {
 
       this.router.handle(message.type, this.ws, message.data);
     } catch (e) {
-      console.log(e);
+      console.error(e);
     }
   }
 
@@ -825,9 +823,9 @@ export class ConnectionHandler {
         try {
           const respMessage = JSON.stringify(resp);
           client.send(respMessage);
-          console.log(respMessage);
+          console.log(resp);
         } catch (e) {
-          console.log(e);
+          console.error(e);
         }
       }
     });
@@ -843,9 +841,9 @@ export class ConnectionHandler {
     try {
       const respMessage = JSON.stringify(resp);
       this.ws.send(respMessage);
-      console.log(respMessage);
+      console.log(resp);
     } catch (e) {
-      console.log(e);
+      console.error(e);
     }
   }
 
