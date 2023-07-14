@@ -2,15 +2,14 @@
   "name": "nodejs-2023-q2-websockets-ui",
   "version": "1.0.0",
   "description": "Template for the WebSocket remote control task",
-  "main": "index.js",
+  "main": "dist/index.js",
   "private": true,
   "scripts": {
-    "prod:build": "rm -rf dist && tsc",
-    "prod:start": "node dist/listen",
     "dev": "ts-node-dev --no-notify --respawn --transpile-only src/listen.ts",
     "prod": "npm run prod:build && npm run prod:start",
-    "build": "npm run prod:build",
-    "start": "npm run prod:start"
+    "prod:build": "rm -rf dist/* && tsc",
+    "prod:start": "node dist/listen.js",
+    "build": "npm run prod:build"
   },
   "repository": {
     "type": "git",
