@@ -3,9 +3,7 @@ import { FinishGameDTO } from './dto/response/FinishGameDTO';
 import { ChangePlayerTurnDTO } from './dto/response/ChangePlayerTurnDTO';
 import { gameFieldRepository } from './repository/GameFieldRepository';
 import { CreateGameDTO } from './dto/response/CreateGameDTO';
-import { AddPlayerDTO } from './dto/request/AddPlayerDTO';
 import { AllCommunicationDTOTypes, CommunicationDTO, CommunicationDTOTypes } from './dto/CommunicationDTO';
-import { PlayerRequestDTO } from './dto/request/PlayerRequestDTO';
 import { PlayerResponseDTO } from './dto/response/PlayerResponseDTO';
 import { IPlayer } from './interfaces/IPlayer';
 import { playerRepository } from './repository/PlayerRepository';
@@ -15,14 +13,16 @@ import { RoomDTO, RoomUser } from './dto/response/RoomDTO';
 import { Router } from './Router';
 import { IGame } from './interfaces/IGame';
 import { gameRepository } from './repository/GameRepository';
-import { AddShipsDTO } from './dto/request/AddShipsDTO';
-import { IGameField, IGameFieldEnemyAttack } from './interfaces/IGameField';
+import { IGameField } from './interfaces/IGameField';
 import { StartGameDTO } from './dto/response/StartGameDTO';
 import { AttackRequestDTO } from './dto/request/AttackRequestDTO';
 import { AttackResponseDTO, TAttackStatus } from './dto/response/AttackResponseDTO';
 import { RandomAttackRequestDTO } from './dto/request/RandomAttackRequestDTO';
-import { getRandomInt } from './utils/utils';
 import { WinnerDTO } from './dto/response/WinnerDTO';
+import { PlayerService } from './services/PlayerService';
+import { RoomService } from './services/RoomService';
+import { GameService } from './services/GameService';
+import { GameFieldService } from './services/GameFieldService';
 
 export class ConnectionHandler {
   private ws: WebSocket;
@@ -71,22 +71,19 @@ export class ConnectionHandler {
     };
 
     const processReg = (ws: WebSocket, messageData: string) => {
-      const playerReq = JSON.parse(messageData) as PlayerRequestDTO;
+      const playerService = new PlayerService();
 
-      if (!playerReq || playerReq.name === undefined || playerReq.password === undefined) {
+      const playerDTO = playerService.convertPlayerRegRequest(messageData);
+
+      if (!playerDTO) {
         return;
       }
 
-      if (playerReq.name.length < 5 || playerReq.password.length < 5) {
-        return;
-      }
-
-      const existingPlayer = playerRepository.findPlayerByName(playerReq.name);
-
+      const existingPlayer = playerRepository.findPlayerByName(playerDTO.name);
       const isPlayerExist = existingPlayer !== null;
 
       if (isPlayerExist) {
-        if (existingPlayer.password !== playerReq.password) {
+        if (existingPlayer.password !== playerDTO.password) {
           sendLoginNotSuccess(existingPlayer, 'Login failed: password incorrect');
           return;
         }
@@ -105,20 +102,12 @@ export class ConnectionHandler {
         return;
       }
 
-      const newPlayer: IPlayer = {
-        id: 1,
-        name: playerReq.name,
-        password: playerReq.password,
-        score: 0,
-        isOnline: true,
-      };
+      const registerResult = playerService.registerPlayer(playerDTO);
 
-      const result = playerRepository.create(newPlayer);
-
-      if (result) {
+      if (registerResult) {
         this.updateRooms();
         this.updateWinners();
-        sendRegSuccess(result);
+        sendRegSuccess(registerResult);
       }
     };
 
@@ -144,8 +133,11 @@ export class ConnectionHandler {
         return;
       }
 
-      const addPlayerDTO = JSON.parse(messageData) as AddPlayerDTO;
-      if (!addPlayerDTO || addPlayerDTO.indexRoom === undefined) {
+      const roomService = new RoomService();
+
+      const addPlayerDTO = roomService.convertAddPlayerRequest(messageData);
+
+      if (!addPlayerDTO) {
         return;
       }
 
@@ -167,14 +159,8 @@ export class ConnectionHandler {
 
       roomRepository.delete(foundRoom.id);
 
-      const game: IGame = {
-        id: 0,
-        playersId: [enemyId, this.getPlayerId()],
-        currentTurnPlayerId: enemyId,
-        isFinished: false,
-      };
-
-      const createGameResult = gameRepository.create(game);
+      const gameService = new GameService();
+      const createGameResult = gameService.createNewGame(enemyId, this.getPlayerId());
 
       if (!createGameResult) {
         return;
@@ -230,32 +216,6 @@ export class ConnectionHandler {
       }
     };
 
-    const changePlayerTurn = (gameId: number) => {
-      const game = gameRepository.findOne(gameId);
-
-      if (!game) {
-        return null;
-      }
-
-      const { playersId } = game;
-
-      if (!playersId || playersId.length !== 2) {
-        return null;
-      }
-
-      const { currentTurnPlayerId } = game;
-
-      const nextPlayerIdInGame = playersId.find((id) => id !== currentTurnPlayerId);
-
-      if (nextPlayerIdInGame === undefined) {
-        return null;
-      }
-
-      game.currentTurnPlayerId = nextPlayerIdInGame;
-
-      return gameRepository.update(gameId, { ...game });
-    };
-
     const sendPlayerTurnByPlayerId = (playerIdTurn: number, playerId: number) => {
       const changePlayerTurnDTO: ChangePlayerTurnDTO = {
         currentPlayer: playerIdTurn,
@@ -274,44 +234,22 @@ export class ConnectionHandler {
         return;
       }
 
-      const addShipsDTO = JSON.parse(messageData) as AddShipsDTO;
-      if (!addShipsDTO || addShipsDTO.gameId === undefined || addShipsDTO.indexPlayer === undefined) {
-        return;
-      }
-
-      if (addShipsDTO.ships === undefined || addShipsDTO.ships.length < 0 || addShipsDTO.ships.length !== 10) {
-        return;
-      }
-
-      const gameField: IGameField = {
-        id: 0,
-        gameId: addShipsDTO.gameId,
-        playerId: this.getPlayerId(),
-        ships: [...addShipsDTO.ships],
-        enemyAttacks: new Array<IGameFieldEnemyAttack>(),
-      };
-
-      const gameFieldResult = gameFieldRepository.create(gameField);
+      const gameFieldService = new GameFieldService();
+      const gameFieldResult = gameFieldService.createGameField(messageData, this.getPlayerId());
 
       if (!gameFieldResult) {
         return;
       }
 
-      const game = gameRepository.findOne(addShipsDTO.gameId);
+      const game = gameRepository.findOne(gameFieldResult.gameId);
 
       if (!game) {
         return;
       }
 
-      const enemyId = game.playersId.filter((playerId) => playerId !== this.getPlayerId());
+      const isEnemyReady = gameFieldService.getIsEnemyReady(gameFieldResult.gameId, this.getPlayerId());
 
-      if (!enemyId || enemyId.length === 0) {
-        return;
-      }
-
-      const enemyGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(game.id, enemyId[0]);
-
-      if (!enemyGameField) {
+      if (!isEnemyReady) {
         return;
       }
 
@@ -343,111 +281,17 @@ export class ConnectionHandler {
       return attackDTO;
     };
 
-    interface TGameFieldCell {
-      shipIndex: number;
-      isHit: boolean;
-      isMiss: boolean;
-    }
-
-    const getConvertedGameField = (attackedPlayerGameField: IGameField) => {
-      const { ships, enemyAttacks } = attackedPlayerGameField;
-
-      const copy = new Array<TGameFieldCell | null>(10);
-      const nodes = new Array<typeof copy>(10);
-
-      for (let i = 0; i < 10; i++) {
-        copy[i] = null;
-      }
-
-      for (let i = 0; i < nodes.length; i++) {
-        nodes[i] = copy.slice(0);
-      }
-
-      const gameField = nodes;
-
-      ships.forEach((ship, index) => {
-        for (let i = 0; i < ship.length; i += 1) {
-          if (ship.direction) {
-            gameField[ship.position.x][ship.position.y + i] = {
-              shipIndex: index,
-              isHit: false,
-              isMiss: false,
-            };
-          } else {
-            gameField[ship.position.x + i][ship.position.y] = {
-              shipIndex: index,
-              isHit: false,
-              isMiss: false,
-            };
-          }
-        }
-      });
-
-      enemyAttacks.forEach((attack) => {
-        if (gameField[attack.position.x][attack.position.y]) {
-          const cell = gameField[attack.position.x][attack.position.y];
-          if (cell) {
-            cell.isHit = true;
-          } else {
-            gameField[attack.position.x][attack.position.y] = {
-              shipIndex: -1,
-              isHit: false,
-              isMiss: true,
-            };
-          }
-        }
-      });
-
-      return gameField;
-    };
-
-    const getIsAttackExists = (xFind: number, yFind: number, enemyAttacks: Array<IGameFieldEnemyAttack>) => {
-      const isHasBeenAttacked = enemyAttacks.find(
-        (attack) => attack.position.x === xFind && attack.position.y === yFind,
-      );
-      return isHasBeenAttacked !== undefined;
-    };
-
     const markAllNeighborCellsAsMiss = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number) => {
-      const gameField = getConvertedGameField(attackedPlayerGameField);
+      const gameFieldService = new GameFieldService();
+      const allCellsAroundShip = gameFieldService.getAllCellsAroundShip(attackedPlayerGameField, xAttack, yAttack);
 
-      const cell = gameField[xAttack][yAttack];
-
-      if (!cell) {
+      if (!allCellsAroundShip) {
         return;
-      }
-
-      const { shipIndex } = cell;
-
-      const ship = attackedPlayerGameField.ships[shipIndex];
-
-      const isVertical = ship.direction;
-
-      let maxHorizontal = isVertical ? ship.position.x + 2 : ship.position.x + ship.length + 1;
-      maxHorizontal = maxHorizontal > 10 ? 10 : maxHorizontal;
-
-      let maxVertical = isVertical ? ship.position.y + ship.length + 1 : ship.position.y + 2;
-      maxVertical = maxVertical > 10 ? 10 : maxVertical;
-
-      const minHorizontal = ship.position.x > 0 ? ship.position.x - 1 : 0;
-      const minVertical = ship.position.y > 0 ? ship.position.y - 1 : 0;
-
-      const newAttacks = new Array<IGameFieldEnemyAttack>();
-
-      for (let xSearch = minHorizontal; xSearch < maxHorizontal; xSearch += 1) {
-        for (let ySearch = minVertical; ySearch < maxVertical; ySearch += 1) {
-          if (gameField[xSearch] && gameField[xSearch][ySearch] !== undefined) {
-            const cellFound = gameField[xSearch][ySearch];
-            if (cellFound === null) {
-              newAttacks.push({ position: { x: xSearch, y: ySearch } });
-            }
-          }
-        }
       }
 
       const newGameField = { ...attackedPlayerGameField };
 
-      newGameField.enemyAttacks = [...newGameField.enemyAttacks, ...newAttacks];
+      newGameField.enemyAttacks = [...newGameField.enemyAttacks, ...allCellsAroundShip];
 
       gameFieldRepository.update(newGameField.id, newGameField);
 
@@ -462,7 +306,7 @@ export class ConnectionHandler {
       const attackedPlayerId = attackedPlayerGameField.playerId;
       const attackerPlayerId = playersId.filter((id) => id !== attackedPlayerId)[0];
 
-      newAttacks.forEach((attack) => {
+      allCellsAroundShip.forEach((attack) => {
         const attackedDTO = getAttackDTO(attack.position.x, attack.position.y, attackerPlayerId, 'miss');
         sendAttackResponseForPlayerWithId(attackedPlayerId, attackedDTO);
 
@@ -472,30 +316,11 @@ export class ConnectionHandler {
     };
 
     const markShipAsDead = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number) => {
-      const gameField = getConvertedGameField(attackedPlayerGameField);
+      const gameFieldService = new GameFieldService();
+      const shipCells = gameFieldService.getAllShipCells(attackedPlayerGameField, xAttack, yAttack);
 
-      const cell = gameField[xAttack][yAttack];
-
-      if (!cell) {
+      if (!shipCells) {
         return;
-      }
-
-      const { shipIndex } = cell;
-
-      const ship = attackedPlayerGameField.ships[shipIndex];
-
-      if (ship.length === 1) {
-        return;
-      }
-
-      const shipCells = new Array<IGameFieldEnemyAttack>();
-
-      for (let i = 0; i < ship.length; i++) {
-        if (ship.direction) {
-          shipCells.push({ position: { x: ship.position.x, y: ship.position.y + i } });
-        } else {
-          shipCells.push({ position: { x: ship.position.x + i, y: ship.position.y } });
-        }
       }
 
       const game = gameRepository.findOne(attackedPlayerGameField.gameId);
@@ -518,91 +343,12 @@ export class ConnectionHandler {
       });
     };
 
-    const isAllShipsAreDead = (attackedPlayerGameField: IGameField) => {
-      const { ships } = attackedPlayerGameField;
-
-      const gameField = getConvertedGameField(attackedPlayerGameField);
-
-      let shipDeadCount = 0;
-
-      for (let i = 0; i < ships.length; i += 1) {
-        const shipCells = gameField.flat().filter((cell) => cell?.shipIndex === i);
-        const intactCells = shipCells.filter((cell) => cell?.isHit === false);
-        if (!intactCells || intactCells.length === 0) {
-          shipDeadCount += 1;
-        }
-      }
-      return shipDeadCount >= 10;
-    };
-
-    const calculateAttack = (attackedPlayerGameField: IGameField, xAttack: number, yAttack: number) => {
-      const { ships } = attackedPlayerGameField;
-      const gameField = getConvertedGameField(attackedPlayerGameField);
-
-      const cell = gameField[xAttack][yAttack];
-      if (cell) {
-        const ship = ships[cell.shipIndex];
-        if (ship) {
-          if (ship.length === 1) {
-            return 'killed';
-          }
-
-          let foundCellsHitWithShipId = 0;
-
-          for (let x = 0; x < gameField.length; x++) {
-            for (let y = 0; y < gameField[x].length; y++) {
-              const cellToFind = gameField[x][y];
-              if (cellToFind) {
-                if (cellToFind.shipIndex === cell.shipIndex && cellToFind.isHit) {
-                  foundCellsHitWithShipId += 1;
-                }
-              }
-            }
-          }
-
-          if (foundCellsHitWithShipId + 1 >= ship.length) {
-            return 'killed';
-          }
-
-          return 'shot';
-        }
-      }
-
-      return 'miss';
-    };
-
-    const generateRandomAttackByPlayerIdAndGameId = (playerId: number, gameId: number) => {
-      const gameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(gameId, playerId);
-
-      if (!gameField) {
-        return null;
-      }
-
-      let found = false;
-      let counter = 0;
-
-      let x = 0;
-      let y = 0;
-
-      while (!found) {
-        x = getRandomInt(0, 9);
-        y = getRandomInt(0, 9);
-
-        found = !getIsAttackExists(x, y, gameField.enemyAttacks);
-        counter += 1;
-
-        if (counter > 99) {
-          break;
-        }
-      }
-
-      return { x, y };
-    };
-
     const processAttack = (ws: WebSocket, messageData: string) => {
       if (this.playerId === -1) {
         return;
       }
+
+      const gameFieldService = new GameFieldService();
 
       const attackReq = JSON.parse(messageData) as AttackRequestDTO;
       const { gameId, x, y, indexPlayer } = attackReq;
@@ -634,9 +380,9 @@ export class ConnectionHandler {
         return;
       }
 
-      const isAttackExists = getIsAttackExists(x, y, enemyGameField.enemyAttacks);
+      const isAttackExists = gameFieldService.getIsAttackExists(x, y, enemyGameField.enemyAttacks);
 
-      const result = calculateAttack(enemyGameField, x, y);
+      const result = gameFieldService.getAttackResult(enemyGameField, x, y);
 
       playersId.forEach((playerId) => {
         const res = sendAttackResponseForPlayerWithId(playerId, getAttackDTO(x, y, attackReq.indexPlayer, result));
@@ -660,7 +406,7 @@ export class ConnectionHandler {
         }
       }
 
-      if (isAllShipsAreDead(enemyGameField)) {
+      if (gameFieldService.getIsAllShipsAreDead(enemyGameField)) {
         this.finishGame(game.id);
         if (enemyId !== -100) {
           this.updateWinnerPlayerScore(this.getPlayerId());
@@ -687,12 +433,16 @@ export class ConnectionHandler {
             return null;
           }
 
-          const botRandomAttack = generateRandomAttackByPlayerIdAndGameId(this.getPlayerId(), game.id);
+          const botRandomAttack = gameFieldService.getRandomAttackByPlayerIdAndGameId(this.getPlayerId(), game.id);
           if (!botRandomAttack) {
             return null;
           }
 
-          const botAttackResult = calculateAttack(playerGameField, botRandomAttack.x, botRandomAttack.y);
+          const botAttackResult = gameFieldService.getAttackResult(
+            playerGameField,
+            botRandomAttack.x,
+            botRandomAttack.y,
+          );
 
           playerGameField.enemyAttacks = [
             ...playerGameField.enemyAttacks,
@@ -725,7 +475,7 @@ export class ConnectionHandler {
 
           const playerGameField = gameFieldRepository.findGameFieldByGameIdAndPlayerId(game.id, this.getPlayerId());
 
-          if (playerGameField && isAllShipsAreDead(playerGameField)) {
+          if (playerGameField && gameFieldService.getIsAllShipsAreDead(playerGameField)) {
             this.finishGame(game.id);
             this.sendPlayerWin(game.id, -100);
             return;
@@ -736,7 +486,9 @@ export class ConnectionHandler {
         return;
       }
 
-      const updatedGame = changePlayerTurn(game.id);
+      const gameService = new GameService();
+
+      const updatedGame = gameService.changePlayerTurn(game.id);
       if (!updatedGame) {
         return;
       }
@@ -748,6 +500,7 @@ export class ConnectionHandler {
 
     const processRandomAttack = (ws: WebSocket, messageData: string) => {
       const randomAttackRequestDTO = JSON.parse(messageData) as RandomAttackRequestDTO;
+      const gameFieldService = new GameFieldService();
 
       if (!randomAttackRequestDTO) {
         return;
@@ -768,7 +521,7 @@ export class ConnectionHandler {
         return;
       }
 
-      const generatedAttack = generateRandomAttackByPlayerIdAndGameId(
+      const generatedAttack = gameFieldService.getRandomAttackByPlayerIdAndGameId(
         randomAttackRequestDTO.indexPlayer,
         randomAttackRequestDTO.gameId,
       );
@@ -787,7 +540,7 @@ export class ConnectionHandler {
         return;
       }
 
-      const result = calculateAttack(enemyGameField, x, y);
+      const result = gameFieldService.getAttackResult(enemyGameField, x, y);
 
       enemyGameField.enemyAttacks = [...enemyGameField.enemyAttacks, { position: { x, y } }];
 
@@ -810,14 +563,16 @@ export class ConnectionHandler {
         markShipAsDead(newGameField, x, y);
       }
 
-      if (isAllShipsAreDead(enemyGameField)) {
+      if (gameFieldService.getIsAllShipsAreDead(enemyGameField)) {
         this.finishGame(game.id);
         this.updateWinnerPlayerScore(this.getPlayerId());
         this.sendPlayerWin(game.id, this.getPlayerId());
         return;
       }
 
-      const updatedGame = changePlayerTurn(game.id);
+      const gameService = new GameService();
+
+      const updatedGame = gameService.changePlayerTurn(game.id);
       if (!updatedGame) {
         return;
       }
