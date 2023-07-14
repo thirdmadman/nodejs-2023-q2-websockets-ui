@@ -5,12 +5,10 @@
   "main": "dist/listen.js",
   "private": true,
   "scripts": {
-    "dev": "ts-node-dev --no-notify --respawn --transpile-only src/listen.ts",
-    "prod": "npm run prod:build && npm run prod:start",
+    "start:dev": "ts-node-dev --no-notify --respawn --transpile-only src/listen.ts",
     "prod:build": "rm -rf dist/* && tsc",
     "prod:start": "node dist/listen.js",
-    "build": "npm run prod:build",
-    "start": "node dist/listen.js"
+    "start": "npm run prod:build && npm run prod:start"
   },
   "repository": {
     "type": "git",
