@@ -9,7 +9,8 @@
     "prod:start": "node dist/listen",
     "dev": "ts-node-dev --no-notify --respawn --transpile-only src/listen.ts",
     "prod": "npm run prod:build && npm run prod:start",
-    "start": "npm run prod:build && npm run prod:start"
+    "build": "npm run prod:build",
+    "start": "npm run prod:start"
   },
   "repository": {
     "type": "git",
