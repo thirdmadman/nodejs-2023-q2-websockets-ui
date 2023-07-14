@@ -5,7 +5,7 @@ import { FRONTEND_PORT, FRONTEND_HOST } from './common/config';
 import { db } from './db/db';
 
 export class StaticServer {
-  constructor() {
+  run() {
     const handleStateContent = (req: IncomingMessage, res: ServerResponse) => {
       const dirPath = resolve(dirname(''));
 

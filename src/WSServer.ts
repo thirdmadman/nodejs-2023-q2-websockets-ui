@@ -7,12 +7,11 @@ import { WSGlobalEventHandler } from './WSGlobalEventHandler';
 import { CommunicationDTOTypes } from './dto/CommunicationDTO';
 
 export class WSServer {
-  private server: WebSocketServer;
+  private server = new WebSocketServer({ port: Number(BACKEND_PORT) });
 
   private wsGlobalEventHandler = new WSGlobalEventHandler();
 
-  constructor() {
-    this.server = new WebSocketServer({ port: Number(BACKEND_PORT) });
+  run() {
     console.log(`WS Server is running on http://${BACKEND_HOST}:${BACKEND_PORT}`);
 
     const wsConnectionHandler = (ws: WebSocket) => {
