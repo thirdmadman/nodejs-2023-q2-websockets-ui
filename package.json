@@ -8,7 +8,8 @@
     "prod:build": "cross-env NODE_ENV=production && rm -rf dist && tsc",
     "prod:start": "node dist/listen",
     "dev": "cross-env NODE_ENV=development ts-node-dev --no-notify --respawn --transpile-only src/listen.ts",
-    "prod": "npm run prod:build && npm run prod:start"
+    "prod": "npm run prod:build && npm run prod:start",
+    "start": "npm run prod:build && npm run prod:start"
   },
   "repository": {
     "type": "git",
