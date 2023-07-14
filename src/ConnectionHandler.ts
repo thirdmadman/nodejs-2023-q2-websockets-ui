@@ -573,6 +573,14 @@ export class ConnectionHandler {
       return 'miss';
     };
 
+    const finishGame = (gameId: number) => {
+      const game = gameRepository.findOne(gameId);
+      if (!game) {
+        return;
+      }
+      gameRepository.update(game.id, { ...game, isFinished: true });
+    };
+
     const processAttack = (ws: WebSocket, messageData: string) => {
       if (this.playerId === -1) {
         return;
@@ -635,7 +643,9 @@ export class ConnectionHandler {
       });
 
       if (isAllShipsAreDead(enemyGameField)) {
-        this.sendPlayerWin(game.id, this.playerId);
+        this.finishGame(game.id);
+        this.updateWinnerPlayerScore(this.getPlayerId());
+        this.sendPlayerWin(game.id, this.getPlayerId());
         return;
       }
 
@@ -745,10 +755,18 @@ export class ConnectionHandler {
         markShipAsDead(newGameField, x, y);
       }
 
+      if (isAllShipsAreDead(enemyGameField)) {
+        this.finishGame(game.id);
+        this.updateWinnerPlayerScore(this.getPlayerId());
+        this.sendPlayerWin(game.id, this.getPlayerId());
+        return;
+      }
+
       const updatedGame = changePlayerTurn(game.id);
       if (!updatedGame) {
         return;
       }
+
       playersId.forEach((playerId) => {
         const res = sendPlayerTurnByPlayerId(updatedGame.currentTurnPlayerId, playerId);
         return res;
@@ -853,6 +871,34 @@ export class ConnectionHandler {
     }
   }
 
+  finishGame(gameId: number) {
+    const game = gameRepository.findGameByPlayerId(gameId);
+
+    if (!game) {
+      return;
+    }
+
+    if (!game.playersId || game.playersId.length !== 2) {
+      return;
+    }
+
+    game.isFinished = true;
+
+    gameRepository.update(game.id, game);
+  }
+
+  updateWinnerPlayerScore(winnerPlayerId: number) {
+    const player = playerRepository.findOne(winnerPlayerId);
+
+    if (!player) {
+      return;
+    }
+
+    player.score += 1;
+
+    playerRepository.update(player.id, { ...player });
+  }
+
   onClose() {
     const playerId = this.getPlayerId();
     if (playerId === -1) {
@@ -866,44 +912,6 @@ export class ConnectionHandler {
       playerRepository.update(existingPlayer.id, existingPlayer);
     }
 
-    const finishGame = (playerIdToFinish: number) => {
-      const game = gameRepository.findGameByPlayerId(playerIdToFinish);
-
-      if (!game) {
-        return;
-      }
-
-      if (!game.playersId || game.playersId.length !== 2) {
-        return;
-      }
-
-      game.isFinished = true;
-
-      const result = gameRepository.update(game.id, game);
-
-      if (!result) {
-        return;
-      }
-
-      const enemyId = game.playersId.filter((id) => id !== playerIdToFinish)[0];
-
-      const playerEnemy = playerRepository.findOne(enemyId);
-
-      if (!playerEnemy) {
-        return;
-      }
-
-      playerEnemy.score += 1;
-
-      const res = playerRepository.update(playerEnemy.id, playerEnemy);
-
-      if (!res) {
-        return;
-      }
-
-      this.sendPlayerWin(game.id, enemyId);
-    };
-
     const closeOwnRoom = (playerIdToClose: number) => {
       const rooms = roomRepository.findAllOwnRoomsByPlayerId(playerIdToClose);
 
@@ -916,9 +924,22 @@ export class ConnectionHandler {
       this.updateRooms();
     };
 
+    const looseAndFinishCurrentGame = (playerIdToLoose: number) => {
+      const game = gameRepository.findGameByPlayerId(playerIdToLoose);
+      if (!game) {
+        return;
+      }
+
+      const enemyId = game.playersId.filter((player) => player !== playerId)[0];
+
+      this.finishGame(game.id);
+      this.updateWinnerPlayerScore(enemyId);
+      this.sendPlayerWin(game.id, enemyId);
+    };
+
     closeOwnRoom(playerId);
 
-    finishGame(playerId);
+    looseAndFinishCurrentGame(playerId);
   }
 
   sendPlayerWin(gameId: number, winnerPlayerId: number) {
